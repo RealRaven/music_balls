@@ -16,6 +16,13 @@
   <div id="crosshair" aria-hidden="true"></div>
   <div id="toast"></div>
 
+  <!-- ===== waiting for music overlay ===== -->
+  <div id="waitingAudio" aria-hidden="true">
+    <div class="wa-icon">♪</div>
+    <div class="wa-title">Waiting for music</div>
+    <div class="wa-sub">The game only moves to the beat. Load a file, share a Chrome tab, or use your mic.</div>
+  </div>
+
   <div id="topRight">
     <button id="btnPause" class="mini">Pause <kbd>P</kbd></button>
     <button id="btnAim"   class="mini">Aim: Mouse</button>
@@ -62,7 +69,7 @@
           </div>
           <div id="meter"><i id="meterFill"></i></div>
           <div class="ab-note">Tab / system audio capture works in <strong>Chrome</strong> — pick a tab and tick
-            “Share audio”. A local server is recommended for mic access.</div>
+            “Share audio”. No music means no game: balls only move while sound is playing.</div>
         </div>
       </section>
 

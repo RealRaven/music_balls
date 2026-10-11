@@ -1,5 +1,6 @@
 /* ============================================================
-   app.js — the arcade shell: menu, HUD, loop, pause, AI toggle.
+   app.js — the arcade shell: menu, HUD, loop, pause, AI toggle,
+   and the "waiting for music" overlay.
    ============================================================ */
 (function (global) {
   'use strict';
@@ -15,6 +16,7 @@
   const hudEl = $('#hudStats');
   const toastEl = $('#toast');
   const crossEl = $('#crosshair');
+  const waitingEl = $('#waitingAudio');
   const pauseEl = $('#pauseOverlay');
   const pauseTitle = $('#pauseTitle');
   const pauseText = $('#pauseText');
@@ -194,6 +196,11 @@
     last = now;
 
     audio.update(dt);
+
+    // Show the "waiting for music" overlay whenever we're in a game but
+    // audio is not actually producing sound.
+    const wantWaiting = !!current && !menuOpen && !paused && !audio.isPlaying;
+    waitingEl.classList.toggle('show', wantWaiting);
 
     if (current && !paused) {
       // AI writes into the same virtual input channel the mouse uses

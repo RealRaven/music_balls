@@ -1,7 +1,7 @@
 /* ============================================================
    rally.js — BALL RALLY
    Keep the ball alive with your paddle. Every return scores.
-   The music makes it faster — and the paddle keeps the spin.
+   The music makes it faster. No music = frozen court.
    ============================================================ */
 (function () {
   'use strict';
@@ -50,7 +50,20 @@
     update(dt) {
       this.time += dt;
       const drive = this.audio.drive;
-      this.speedMul = U.smooth(this.speedMul, 1 + drive * 1.6, 0.08, dt);
+      const playing = this.audio.isPlaying;
+
+      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.2, 0.18, dt);
+
+      // Effects always fade
+      for (let i = this.fx.length - 1; i >= 0; i--) {
+        const f = this.fx[i];
+        f.life -= dt; f.r += f.grow * dt;
+        if (f.life <= 0) this.fx.splice(i, 1);
+      }
+
+      // ────────── THE GATE ──────────
+      // No music, nothing moves. Paddle and ball stay frozen.
+      if (!playing) return;
 
       // paddle follows the pointer (x and y)
       this.lastPx = this.px;
@@ -100,12 +113,6 @@
           this.serveBall();
         }
       }
-
-      for (let i = this.fx.length - 1; i >= 0; i--) {
-        const f = this.fx[i];
-        f.life -= dt; f.r += f.grow * dt;
-        if (f.life <= 0) this.fx.splice(i, 1);
-      }
     }
 
     draw() {
@@ -145,6 +152,8 @@
     }
 
     ai() {
+      if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
+
       const b = this.ball;
       // Predict where the ball will be when it reaches the paddle plane.
       let tx = b.x, ty = b.y;

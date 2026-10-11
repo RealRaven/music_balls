@@ -1,7 +1,8 @@
 /* ============================================================
    audio.js — Web Audio input + analysis.
-   Sources: local file, microphone, or a shared browser tab
-   (getDisplayMedia — Chrome only, needs "Share audio").
+   Exposes:
+     • drive     — bass × sensitivity, 0..2, drives gameplay
+     • isPlaying — true while the source is actually producing sound
    ============================================================ */
 (function (global) {
   'use strict';
@@ -12,24 +13,28 @@
     constructor() {
       this.ctx = null;
       this.analyser = null;
+      this.outputGain = null;
       this.data = null;
       this.source = null;
       this.el = null;
       this.stream = null;
+
       this.enabled = false;
-      this.mode = 'none';          // 'none' | 'file' | 'mic' | 'tab'
+      this.mode = 'none';
       this.sensitivity = 1;
+
       this.bass = 0;
+      this.rawBass = 0;
       this.mid = 0;
       this.treble = 0;
       this.level = 0;
       this.beat = false;
+
       this.onMeter = null;
       this._bassAvg = 0;
       this._sinceBeat = 1;
+      this._signalTime = 99;   // seconds since last meaningful signal
     }
-
-    /* ---------- internals ---------- */
 
     _ensureCtx() {
       if (!this.ctx) {
@@ -45,38 +50,49 @@
       const ctx = this._ensureCtx();
       this.analyser = ctx.createAnalyser();
       this.analyser.fftSize = 1024;
-      this.analyser.smoothingTimeConstant = 0.72;
+      this.analyser.smoothingTimeConstant = 0.55;
       this.data = new Uint8Array(this.analyser.frequencyBinCount);
+
+      this.outputGain = ctx.createGain();
+      this.outputGain.gain.value = 0;
+      this.analyser.connect(this.outputGain);
+      this.outputGain.connect(ctx.destination);
     }
 
     _disconnectSource() {
       if (this.source) {
-        try { this.source.disconnect(); } catch (e) { /* noop */ }
+        try { this.source.disconnect(); } catch (e) {}
         this.source = null;
       }
     }
 
-    /* ---------- public API ---------- */
-
     async useFile(file) {
+      this._ensureCtx();
       this.stop();
+
+      const ctx = this._ensureCtx();
       const el = new Audio();
       el.src = URL.createObjectURL(file);
       el.loop = true;
       el.crossOrigin = 'anonymous';
       this.el = el;
       await el.play().catch(() => {});
+
       this._makeAnalyser();
       this._disconnectSource();
-      this.source = this.ctx.createMediaElementSource(el);
-      this.source.connect(this.analyser);   // analyser is NOT routed to output
+      this.source = ctx.createMediaElementSource(el);
+      this.source.connect(this.analyser);
+      this.outputGain.gain.value = 1;
+
       this.enabled = true;
       this.mode = 'file';
       return true;
     }
 
     async useMic() {
+      this._ensureCtx();
       this.stop();
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
@@ -94,16 +110,23 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
         throw new Error('Screen/tab capture is not supported in this browser.');
       }
+      this._ensureCtx();
       this.stop();
+
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        audio: true, video: true, preferCurrentTab: false
+        video: true,
+        audio: true
       });
+
       if (!stream.getAudioTracks().length) {
         stream.getTracks().forEach(t => t.stop());
         throw new Error('NO_AUDIO');
       }
-      // discard the video half, we only wanted the audio
-      stream.getVideoTracks().forEach(t => { t.enabled = false; try { stream.removeTrack(t); t.stop(); } catch (e) {} });
+
+      // Only disable — never removeTrack / stop. Stopping kills the whole capture.
+      stream.getVideoTracks().forEach(track => {
+        try { track.enabled = false; } catch (e) {}
+      });
 
       this._makeAnalyser();
       this._disconnectSource();
@@ -113,7 +136,6 @@
       this.enabled = true;
       this.mode = 'tab';
 
-      // user pressed "Stop sharing" in the browser bar
       stream.getAudioTracks()[0].addEventListener('ended', () => this.stop());
       return true;
     }
@@ -131,18 +153,21 @@
         this.analyser = null;
         this.data = null;
       }
+      if (this.outputGain) {
+        try { this.outputGain.disconnect(); } catch (e) {}
+        this.outputGain = null;
+      }
       if (this.stream) {
         this.stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
         this.stream = null;
       }
-      this.bass = this.mid = this.treble = this.level = 0;
+      this.bass = this.rawBass = this.mid = this.treble = this.level = 0;
       this.beat = false;
+      this._signalTime = 99;
       if (this.onMeter) this.onMeter(0);
     }
 
     setSensitivity(v) { this.sensitivity = v; }
-
-    /* ---------- per-frame analysis ---------- */
 
     _band(a, b) {
       if (!this.data) return 0;
@@ -153,11 +178,15 @@
 
     update(dt) {
       this.beat = false;
+
       if (!this.enabled || !this.analyser || !this.data) {
-        this.bass = U.smooth(this.bass, 0, 0.12, dt);
-        this.mid = U.smooth(this.mid, 0, 0.12, dt);
-        this.treble = U.smooth(this.treble, 0, 0.12, dt);
-        this.level = this.bass;
+        this.rawBass = U.smooth(this.rawBass, 0, 0.25, dt);
+        this.bass    = U.smooth(this.bass,    0, 0.12, dt);
+        this.mid     = U.smooth(this.mid,     0, 0.12, dt);
+        this.treble  = U.smooth(this.treble,  0, 0.12, dt);
+        this.level   = this.bass;
+        this._signalTime += dt;
+        if (this.onMeter) this.onMeter(this.level);
         return;
       }
 
@@ -168,10 +197,19 @@
       const m = this._band(Math.floor(n * 0.06), Math.floor(n * 0.25));
       const t = this._band(Math.floor(n * 0.25), Math.floor(n * 0.60));
 
-      this.bass = U.smooth(this.bass, b, 0.55, dt);
-      this.mid = U.smooth(this.mid, m, 0.45, dt);
-      this.treble = U.smooth(this.treble, t, 0.45, dt);
-      this.level = this.bass;
+      this.rawBass = U.smooth(this.rawBass, b, 0.90, dt);
+      this.bass    = U.smooth(this.bass,    b, 0.35, dt);
+      this.mid     = U.smooth(this.mid,    m, 0.45, dt);
+      this.treble  = U.smooth(this.treble, t, 0.45, dt);
+      this.level   = this.bass;
+
+      // Track how long it's been since we last saw actual signal.
+      // 0.015 ≈ −36 dBFS — comfortably above background noise.
+      if (b > 0.015) {
+        this._signalTime = 0;
+      } else {
+        this._signalTime += dt;
+      }
 
       this._bassAvg = this._bassAvg * 0.92 + b * 0.08;
       this._sinceBeat += dt;
@@ -183,8 +221,18 @@
       if (this.onMeter) this.onMeter(this.level);
     }
 
-    /** Convenience: bass already scaled by the sensitivity slider. */
-    get drive() { return U.clamp(this.bass * this.sensitivity, 0, 2); }
+    /** True while a source is connected AND producing sound.
+     *  A brief quiet passage (<2.5 s) keeps it true so the game
+     *  doesn't hiccup on every drum gap. */
+    get isPlaying() {
+      return this.enabled && this._signalTime < 2.5;
+    }
+
+    /** Sensitivity-scaled bass for gameplay. Zero when no signal. */
+    get drive() {
+      if (!this.enabled) return 0;
+      return U.clamp(this.rawBass * this.sensitivity, 0, 2);
+    }
   }
 
   Arcade.AudioEngine = AudioEngine;

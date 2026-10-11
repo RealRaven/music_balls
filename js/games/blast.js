@@ -1,15 +1,17 @@
 /* ============================================================
    blast.js — BALL BLAST
-   Shoot the spheres before they reach you. Elite (red) spheres
-   take a beating and pay out big. Weapon upgrades every N points.
+   No music = no balls. Speed and spawn rate scale with the bass.
    ============================================================ */
 (function () {
   'use strict';
-  const U = window.U = window.BallArcade.U;
+  const U = window.BallArcade.U;
   const Arcade = window.BallArcade;
 
   const C_NORMAL = '#7bd389';
   const C_ELITE = '#ff4d4f';
+  const BASE_INTERVAL = 1.2;
+  const MIN_INTERVAL = 0.18;
+  const RAMP_PER_SPAWN = 0.004;
 
   class Blast extends Arcade.Game {
     constructor(shell) {
@@ -26,16 +28,19 @@
       this.level = 1;
       this.damage = 10;
       this.nextUpgrade = 50;
-      this.interval = 1.2;
+
+      this.interval = BASE_INTERVAL;
       this.spawnTimer = 0.4;
       this.speedMul = 1;
+      this.spawnMul = 1;
       this.bob = 0;
+
       this.lastShot = -10;
       this.recoil = 0;
       this.hitFlash = 0;
+
       const c = this.r.camera;
       c.x = 0; c.y = 1.6; c.z = 5; c.yaw = 0; c.pitch = 0;
-      for (let i = 0; i < 4; i++) this.spawn(true);
     }
 
     spawn(spread) {
@@ -53,30 +58,46 @@
         phase: U.rand(0, 6.28),
         flash: 0
       });
+      this.interval = Math.max(MIN_INTERVAL, this.interval - RAMP_PER_SPAWN);
     }
 
     update(dt) {
       this.time += dt;
       const drive = this.audio.drive;
+      const playing = this.audio.isPlaying;
 
-      // --- audio drives speed, spawn rate and camera bob ---
-      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.2, 0.08, dt);
-      this.interval = U.smooth(this.interval, 1.2 / (1 + drive * 1.6), 0.06, dt);
-      this.bob = U.smooth(this.bob, U.clamp((drive - 0.35) * 2, -0.6, 0.6), 0.12, dt);
+      // Audio-driven multipliers (decay to base when drive = 0)
+      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.4, 0.20, dt);
+      this.spawnMul = U.smooth(this.spawnMul, 1 / (1 + drive * 2.4), 0.25, dt);
+      this.bob = U.smooth(this.bob, U.clamp((drive - 0.35) * 2, -0.6, 0.6), 0.20, dt);
       this.r.camera.z = 5 + this.bob;
 
-      // --- spawning ---
+      // Effects always fade so nothing gets stuck on screen
+      for (let i = this.fx.length - 1; i >= 0; i--) {
+        const f = this.fx[i];
+        f.life -= dt;
+        f.r += f.grow * dt;
+        if (f.life <= 0) this.fx.splice(i, 1);
+      }
+      this.hitFlash = Math.max(0, this.hitFlash - dt * 2.5);
+      this.recoil = Math.max(0, this.recoil - dt * 6);
+
+      // ────────── THE GATE ──────────
+      // No music, no game. Nothing spawns, nothing moves.
+      if (!playing) return;
+
+      // Spawning
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawn(false);
-        this.spawnTimer = this.interval;
+        this.spawnTimer = this.interval * this.spawnMul;
       }
 
-      // --- movement ---
-      const globalMul = this.speedMul * (1 + Math.min(1.5, this.kills / 30));
+      // Ball movement
+      const killRamp = 1 + Math.min(1.5, this.kills / 30);
       for (let i = this.balls.length - 1; i >= 0; i--) {
         const b = this.balls[i];
-        b.z += (b.elite ? 7 : 4) * globalMul * dt;
+        b.z += (b.elite ? 7 : 4) * this.speedMul * killRamp * dt;
         b.flash = Math.max(0, b.flash - dt * 4);
         if (b.z > this.r.camera.z - 1.2) {
           this.balls.splice(i, 1);
@@ -86,18 +107,8 @@
         }
       }
 
-      // --- shooting ---
+      // Shooting
       if (this.input.firing) this.shoot();
-      this.recoil = Math.max(0, this.recoil - dt * 6);
-
-      // --- effects ---
-      for (let i = this.fx.length - 1; i >= 0; i--) {
-        const f = this.fx[i];
-        f.life -= dt;
-        f.r += f.grow * dt;
-        if (f.life <= 0) this.fx.splice(i, 1);
-      }
-      this.hitFlash = Math.max(0, this.hitFlash - dt * 2.5);
     }
 
     shoot() {
@@ -142,7 +153,6 @@
       const i = this.balls.indexOf(b);
       if (i >= 0) this.balls.splice(i, 1);
 
-      // weapon upgrades
       if (this.score >= this.nextUpgrade) {
         this.level++;
         this.damage = Math.round(this.damage * 1.6);
@@ -178,18 +188,16 @@
         r.ring(f.p, f.r, f.color, 3, a);
       }
 
-      // subtle crosshair halo so the player can see where the shot goes
       const s = this.aimScreen();
       const pulse = 16 + this.recoil * 10;
-      r.ring({ x: this.r.camera.x, y: this.r.camera.y, z: this.r.camera.z - 2 }, 1, '#9fc6ff', 1, 0);
       r.rect(s.x - pulse / 2, s.y - 1, pulse, 2, 'rgba(159,198,255,.30)');
       r.rect(s.x - 1, s.y - pulse / 2, 2, pulse, 'rgba(159,198,255,.30)');
     }
 
     ai() {
+      if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
       let target = null, bestScore = Infinity;
       for (const b of this.balls) {
-        // prioritize things that are about to hit us
         const tta = (this.r.camera.z - 1.2 - b.z) / 6;
         const score = tta - b.points * 0.02;
         if (score < bestScore) { bestScore = score; target = b; }

@@ -1,7 +1,7 @@
 /* ============================================================
    match.js — BALL MATCH
    A target colour is announced. Shoot only the spheres wearing
-   that colour. Wrong colour = combo wipe and a lost life.
+   that colour. No music = no balls.
    ============================================================ */
 (function () {
   'use strict';
@@ -38,7 +38,6 @@
       this.targetTimer = 9;
       const c = this.r.camera;
       c.x = 0; c.y = 1.6; c.z = 5; c.yaw = 0; c.pitch = 0;
-      for (let i = 0; i < 5; i++) this.spawn(true);
     }
 
     get target() { return PALETTE[this.targetIndex]; }
@@ -70,9 +69,22 @@
     update(dt) {
       this.time += dt;
       const drive = this.audio.drive;
+      const playing = this.audio.isPlaying;
 
-      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.0, 0.08, dt);
-      this.interval = U.smooth(this.interval, 1.15 / (1 + drive * 1.4), 0.06, dt);
+      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.4, 0.18, dt);
+      this.interval = U.smooth(this.interval, 1.15 / (1 + drive * 2.2), 0.20, dt);
+
+      // Effects always fade
+      for (let i = this.fx.length - 1; i >= 0; i--) {
+        const f = this.fx[i];
+        f.life -= dt; f.r += f.grow * dt;
+        if (f.life <= 0) this.fx.splice(i, 1);
+      }
+
+      // ────────── THE GATE ──────────
+      // No music, no balls and the target timer pauses too.
+      if (!playing) return;
+
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawn(false);
@@ -99,12 +111,6 @@
       }
 
       if (this.input.firing) this.shoot();
-
-      for (let i = this.fx.length - 1; i >= 0; i--) {
-        const f = this.fx[i];
-        f.life -= dt; f.r += f.grow * dt;
-        if (f.life <= 0) this.fx.splice(i, 1);
-      }
     }
 
     shoot() {
@@ -167,6 +173,8 @@
     }
 
     ai() {
+      if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
+
       // Nearest ball of the target colour.
       let target = null, best = Infinity;
       for (const b of this.balls) {
@@ -175,7 +183,6 @@
         best = b.z;
         target = b;
       }
-      // If a target ball is dangerously close, drop everything for it.
       if (!target) return { x: 0, y: 0, fire: false };
       return this.aimAt({ x: target.x, y: target.y, z: target.z }, true);
     }

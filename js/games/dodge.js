@@ -2,6 +2,7 @@
    dodge.js — BALL DODGE
    You are a little orb drifting in a corridor of incoming
    spheres. Survive, graze for bonus points. No shooting.
+   No music = nothing moves.
    ============================================================ */
 (function () {
   'use strict';
@@ -49,9 +50,23 @@
     update(dt) {
       this.time += dt;
       const drive = this.audio.drive;
+      const playing = this.audio.isPlaying;
 
-      this.speedMul = U.smooth(this.speedMul, 1 + drive * 1.8, 0.07, dt);
-      this.interval = U.smooth(this.interval, 0.9 / (1 + drive * 1.4), 0.06, dt);
+      // Audio multipliers decay to base
+      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.4, 0.18, dt);
+      this.interval = U.smooth(this.interval, 0.9 / (1 + drive * 2.2), 0.20, dt);
+
+      // Effects always fade
+      for (let i = this.fx.length - 1; i >= 0; i--) {
+        const f = this.fx[i];
+        f.life -= dt; f.r += f.grow * dt;
+        if (f.life <= 0) this.fx.splice(i, 1);
+      }
+
+      // ────────── THE GATE ──────────
+      // No music, nothing moves. Player is frozen in place.
+      if (!playing) return;
+
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawn();
@@ -99,12 +114,6 @@
 
         if (b.z > this.r.camera.z + 3) this.balls.splice(i, 1);
       }
-
-      for (let i = this.fx.length - 1; i >= 0; i--) {
-        const f = this.fx[i];
-        f.life -= dt; f.r += f.grow * dt;
-        if (f.life <= 0) this.fx.splice(i, 1);
-      }
     }
 
     draw() {
@@ -129,9 +138,9 @@
       r.text(r.w / 2, 34, this.survived.toFixed(1) + 's', '#ffffff', 22, 'center', 800);
     }
 
-    constructor2() {}
-
     ai(dt) {
+      if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
+
       // Move away from the projected impact point of the most dangerous ball,
       // and towards open space.
       let dangerX = 0, dangerY = 0, danger = 0;

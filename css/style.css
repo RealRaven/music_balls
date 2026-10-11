@@ -205,3 +205,27 @@ canvas{display:block;touch-action:none;user-select:none;-webkit-user-select:none
   #topRight{right:8px;top:8px;gap:6px}
   .mini{padding:6px 9px;font-size:11px}
 }
+/* ---------- waiting-for-audio overlay ---------- */
+#waitingAudio{
+  position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  z-index:14;pointer-events:none;text-align:center;
+  opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s;
+  background:rgba(0,0,0,.55);
+  border:1px solid var(--border);border-radius:16px;
+  padding:26px 34px;backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+  max-width:min(420px,86vw);
+}
+#waitingAudio.show{opacity:1;visibility:visible}
+#waitingAudio .wa-icon{
+  font-size:44px;line-height:1;color:#ff7850;margin-bottom:10px;
+  text-shadow:0 0 18px rgba(255,120,80,.45);
+  animation:pulseGlow 1.6s ease-in-out infinite;
+}
+#waitingAudio .wa-title{font-size:18px;font-weight:800;letter-spacing:.3px;margin-bottom:6px}
+#waitingAudio .wa-sub{font-size:13px;color:var(--muted);line-height:1.55}
+
+@keyframes pulseGlow{
+  0%,100%{transform:scale(1);opacity:.8}
+  50%{transform:scale(1.14);opacity:1}
+}

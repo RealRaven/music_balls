@@ -1,7 +1,7 @@
 /* ============================================================
    catch.js — BALL CATCH
    Catch the cool-coloured spheres in your basket, dodge the red
-   ones. Pure 2D falling-ball reflex game with an audio pace.
+   ones. No music = no falling balls.
    ============================================================ */
 (function () {
   'use strict';
@@ -52,9 +52,22 @@
     update(dt) {
       this.time += dt;
       const drive = this.audio.drive;
+      const playing = this.audio.isPlaying;
 
-      this.fallMul = U.smooth(this.fallMul, 1 + drive * 1.5, 0.07, dt);
-      this.interval = U.smooth(this.interval, 0.85 / (1 + drive * 1.3), 0.06, dt);
+      this.fallMul = U.smooth(this.fallMul, 1 + drive * 2.2, 0.18, dt);
+      this.interval = U.smooth(this.interval, 0.85 / (1 + drive * 2.0), 0.20, dt);
+
+      // Effects always fade
+      for (let i = this.fx.length - 1; i >= 0; i--) {
+        const f = this.fx[i];
+        f.life -= dt; f.r += f.grow * dt;
+        if (f.life <= 0) this.fx.splice(i, 1);
+      }
+
+      // ────────── THE GATE ──────────
+      // No music, nothing falls. Basket stays where it was.
+      if (!playing) return;
+
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawn();
@@ -100,12 +113,6 @@
           }
         }
       }
-
-      for (let i = this.fx.length - 1; i >= 0; i--) {
-        const f = this.fx[i];
-        f.life -= dt; f.r += f.grow * dt;
-        if (f.life <= 0) this.fx.splice(i, 1);
-      }
     }
 
     draw() {
@@ -136,6 +143,8 @@
     }
 
     ai() {
+      if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
+
       // Prefer the nearest good ball that is still catchable; bail out if
       // a bomb is closer to the basket.
       let targetX = null, bestT = Infinity;

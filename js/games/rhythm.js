@@ -1,7 +1,7 @@
 /* ============================================================
    rhythm.js — BALL RHYTHM
    Spheres fly down three lanes and cross a glowing timing ring.
-   Fire exactly on the beat for a PERFECT. Missing breaks the combo.
+   Fire exactly on the beat for a PERFECT. No music = no notes.
    ============================================================ */
 (function () {
   'use strict';
@@ -52,8 +52,21 @@
     update(dt) {
       this.time += dt;
       const drive = this.audio.drive;
+      const playing = this.audio.isPlaying;
 
-      this.speedMul = U.smooth(this.speedMul, 1 + drive * 1.4, 0.07, dt);
+      this.speedMul = U.smooth(this.speedMul, 1 + drive * 1.8, 0.18, dt);
+
+      // Effects always fade
+      for (let i = this.fx.length - 1; i >= 0; i--) {
+        const f = this.fx[i];
+        f.life -= dt; f.r += f.grow * dt;
+        if (f.life <= 0) this.fx.splice(i, 1);
+      }
+      this.judgeLife = Math.max(0, this.judgeLife - dt);
+
+      // ────────── THE GATE ──────────
+      // No music, nothing moves. Notes freeze on the lanes.
+      if (!playing) return;
 
       // spawn on detected beats, otherwise on the interval
       this.spawnTimer -= dt;
@@ -82,13 +95,6 @@
       }
 
       if (this.input.firing) this.fire();
-      this.judgeLife = Math.max(0, this.judgeLife - dt);
-
-      for (let i = this.fx.length - 1; i >= 0; i--) {
-        const f = this.fx[i];
-        f.life -= dt; f.r += f.grow * dt;
-        if (f.life <= 0) this.fx.splice(i, 1);
-      }
     }
 
     fire() {
@@ -158,6 +164,8 @@
     }
 
     ai() {
+      if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
+
       // Fire only when a note is inside the tightest window.
       let target = null, best = Infinity;
       for (const n of this.notes) {
