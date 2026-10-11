@@ -3,6 +3,7 @@
    Balls spawn on beats, bursts on downbeats, shards on treble
    onsets, titans on bass build-ups. Speed locked to BPM.
    Player shots deal double damage on the beat.
+   Forward-motion drive: scrolling grid, streaks, beat FOV kick.
    No music = no balls.
    ============================================================ */
 (function () {
@@ -115,8 +116,15 @@
       this.hitFlash = 0;
       this.beatHitFlash = 0;
 
+      // forward-motion drive
+      this.drivePhase = 0;
+      this.streaks = [];
+      this._initStreaks();
+      this._baseFov = 60;
+
       const c = this.r.camera;
       c.x = 0; c.y = 1.6; c.z = 5; c.yaw = 0; c.pitch = 0;
+      c.fov = this._baseFov;
     }
 
     /* Estimate BPM from the median gap between recent beats. */
@@ -155,13 +163,33 @@
       });
     }
 
+    /* Forward-motion streaks — short dashes on the sides of the
+       corridor that rush past the camera to sell the "flying in"
+       feeling. Recycled, not respawned. */
+    _initStreaks() {
+      this.streaks.length = 0;
+      for (let i = 0; i < 44; i++) this.streaks.push(this._newStreak(true));
+    }
+
+    _newStreak(initial) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      return {
+        x: side * U.rand(9, 22),
+        y: U.rand(-1.2, 6.2),
+        z: initial ? U.rand(-170, 5) : U.rand(-180, -140),
+        len: U.rand(2.5, 7),
+        alpha: U.rand(0.35, 0.85),
+        color: Math.random() < 0.6 ? '#4cc9f0' : '#7bd389'
+      };
+    }
+
     /* Choose a ball type from the current musical signals. */
     pickType(energy, downbeat, trebleHit, bassRising) {
       if (downbeat && energy > 0.75 && Math.random() < 0.18) return 'titan';
       if (downbeat) return 'elite';
-      if (trebleHit && Math.random() < 0.40) return 'shard';   // ← blue kept as-is
+      if (trebleHit && Math.random() < 0.40) return 'shard';
       if (bassRising && energy > 0.45 && Math.random() < 0.35) return 'titan';
-      // reds scale with intensity: ~10% when quiet, ~55% at peak
+      // reds scale with intensity: ~10% quiet, ~55% at peak
       if (Math.random() < 0.10 + energy * 0.45) return 'elite';
       return 'grunt';
     }
@@ -253,6 +281,23 @@
         this._fallbackTimer = 0.75;
       }
 
+      // ── forward motion ──
+      // The world scrolls toward the player. Speed is locked to the same
+      // BPM multiplier that drives the balls, so the whole scene breathes
+      // with the track.
+      const forward = 55 * this.speedMul * (1 + drive * 0.5);
+      this.drivePhase += forward * dt;
+
+      for (const s of this.streaks) {
+        s.z += forward * 2.6 * dt;
+        if (s.z > this.r.camera.z + 3) {
+          Object.assign(s, this._newStreak(false));
+        }
+      }
+
+      // subtle FOV pulse on the beat — a small "kick forward"
+      this.r.camera.fov = this._baseFov + this._beatPulse * 2.5 + energy * 2.0;
+
       // ── movement ──
       const breathing = 1 + 0.18 * Math.sin(beatPhase * Math.PI * 2);
       const killRamp = 1 + Math.min(0.5, this.kills / 80);
@@ -292,7 +337,7 @@
       this.lastShot = this.time;
       this.recoil = 1;
 
-      // on-beat shots deal double damage
+      // on-beat shots deal double damage — only when we actually have a lock
       const phase = this.audio.beatPhase;
       const locked = this.bpm > 0;
       const onBeat = locked && (phase < 0.04 || phase > 0.96);
@@ -349,7 +394,33 @@
 
     draw() {
       const r = this.r;
-      r.grid(-1.5, 90, 5, '#2b3f66', 0.28);
+
+      // ── scrolling ground grid ──
+      // Lines perpendicular to travel scroll with drivePhase; lines that
+      // run along the direction of travel stay put (like rail sleepers vs
+      // rails). This is what reads as forward motion.
+      const step = 5;
+      const span = 90;
+      const off = this.drivePhase % step;
+      for (let z = -span; z <= span; z += step) {
+        const zz = z - off;
+        r.line({ x: -span, y: -1.5, z: zz }, { x: span, y: -1.5, z: zz }, '#2b3f66', 1, 0.28);
+      }
+      for (let x = -span; x <= span; x += step) {
+        r.line({ x, y: -1.5, z: -span }, { x, y: -1.5, z: span }, '#2b3f66', 1, 0.28);
+      }
+
+      // ── forward-motion streaks ──
+      // Brighten with bass and beat so they flare on the drop.
+      const driveBoost = 0.7 + this.speedMul * 0.5 + this._beatPulse * 0.5;
+      for (const s of this.streaks) {
+        const a = U.clamp(s.alpha * driveBoost, 0, 1);
+        r.line(
+          { x: s.x, y: s.y, z: s.z },
+          { x: s.x, y: s.y, z: s.z - s.len },
+          s.color, 2, a
+        );
+      }
 
       // red damage flash
       if (this.hitFlash > 0) {
@@ -369,7 +440,7 @@
         r.rect(0, 0, r.w, r.h, 'rgba(47,140,255,' + a + ')');
       }
 
-      // on-beat shot flash
+      // on-beat shot flash — subtle, short, only the edges
       if (this.beatHitFlash > 0) {
         const a = (this.beatHitFlash * 0.10).toFixed(3);
         r.rect(0, 0, r.w, 5, 'rgba(255,240,150,' + a + ')');
