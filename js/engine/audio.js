@@ -1,8 +1,11 @@
 /* ============================================================
    audio.js — Web Audio input + analysis.
    Exposes:
-     • drive     — bass × sensitivity, 0..2, drives gameplay
-     • isPlaying — true while the source is actually producing sound
+     • drive       — bass × sensitivity, 0..2, drives gameplay
+     • isPlaying   — true while the source is actually producing sound
+     • beat/beatPhase/beatInBar/bar/isDownbeat/isBarStart
+     • bassTrend   — -1..1, rising or falling low-end
+     • trebleBeat  — separate onset detector on the hi-band
    ============================================================ */
 (function (global) {
   'use strict';
@@ -34,6 +37,22 @@
       this._bassAvg = 0;
       this._sinceBeat = 1;
       this._signalTime = 99;   // seconds since last meaningful signal
+
+      /* ----- musical structure signals ----- */
+      this.time        = 0;      // engine-local clock
+      this.beatCount   = 0;      // total beats seen
+      this.beatPhase   = 0;      // 0..1, position between last and next beat
+      this.beatInBar   = 0;      // 0..3 (assumes 4/4)
+      this.bar         = 0;      // total bars seen
+      this.isDownbeat  = false;  // true for one frame on beat 0 of a bar
+      this.isBarStart  = false;  // true for one frame when a new bar begins
+      this.bassTrend   = 0;      // -1..1, rising (positive) or falling
+      this.trebleBeat  = false;  // separate transient detector on the hi-band
+
+      this._lastBeatTime = null;
+      this._beatGap      = 0.5;  // seconds per beat (derived from beats)
+      this._trebleAvg    = 0;
+      this._sinceTreble  = 99;
     }
 
     _ensureCtx() {
@@ -163,6 +182,21 @@
       }
       this.bass = this.rawBass = this.mid = this.treble = this.level = 0;
       this.beat = false;
+
+      // reset derived signals
+      this.beatCount = 0;
+      this.beatInBar = 0;
+      this.bar = 0;
+      this.isDownbeat = false;
+      this.isBarStart = false;
+      this.bassTrend = 0;
+      this.trebleBeat = false;
+      this.beatPhase = 0;
+      this._lastBeatTime = null;
+      this._beatGap = 0.5;
+      this._trebleAvg = 0;
+      this._sinceTreble = 99;
+
       this._signalTime = 99;
       if (this.onMeter) this.onMeter(0);
     }
@@ -177,6 +211,7 @@
     }
 
     update(dt) {
+      this.time += dt;
       this.beat = false;
 
       if (!this.enabled || !this.analyser || !this.data) {
@@ -186,6 +221,13 @@
         this.treble  = U.smooth(this.treble,  0, 0.12, dt);
         this.level   = this.bass;
         this._signalTime += dt;
+
+        this.isDownbeat = false;
+        this.isBarStart = false;
+        this.trebleBeat = false;
+        this.bassTrend = 0;
+        this.beatPhase = 0;
+
         if (this.onMeter) this.onMeter(this.level);
         return;
       }
@@ -211,12 +253,53 @@
         this._signalTime += dt;
       }
 
+      // ── beat detection ─────────────────────────────────────────
       this._bassAvg = this._bassAvg * 0.92 + b * 0.08;
       this._sinceBeat += dt;
       if (b > this._bassAvg * 1.35 + 0.03 && this._sinceBeat > 0.22) {
         this.beat = true;
         this._sinceBeat = 0;
       }
+
+      // ── musical structure signals ──────────────────────────────
+      if (this.beat) {
+        if (this._lastBeatTime !== null) {
+          const gap = this.time - this._lastBeatTime;
+          if (gap > 0.20 && gap < 2.0) {
+            this._beatGap = this._beatGap * 0.7 + gap * 0.3;
+          }
+        }
+        this._lastBeatTime = this.time;
+
+        this.beatCount++;
+        this.beatInBar = (this.beatInBar + 1) % 4;
+        this.isDownbeat = this.beatInBar === 0;
+        if (this.isDownbeat && this.beatCount > 0) {
+          this.bar++;
+          this.isBarStart = true;
+        } else {
+          this.isBarStart = false;
+        }
+      } else {
+        this.isDownbeat = false;
+        this.isBarStart = false;
+      }
+
+      // 0 right on the beat, →1 just before the next one
+      this.beatPhase = this._lastBeatTime === null
+        ? 0
+        : U.clamp((this.time - this._lastBeatTime) / this._beatGap, 0, 1);
+
+      // bass trend: is the low-end rising or falling right now?
+      this.bassTrend = U.clamp((this.rawBass - this.bass) * 6, -1, 1);
+
+      // treble onset detector
+      this._sinceTreble += dt;
+      const tNow = this.treble;
+      const tAvg = this._trebleAvg;
+      this.trebleBeat = tNow > tAvg * 1.4 + 0.02 && this._sinceTreble > 0.12;
+      if (this.trebleBeat) this._sinceTreble = 0;
+      this._trebleAvg = tAvg * 0.92 + tNow * 0.08;
 
       if (this.onMeter) this.onMeter(this.level);
     }
