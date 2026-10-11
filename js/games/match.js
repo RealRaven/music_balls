@@ -1,7 +1,7 @@
 /* ============================================================
    match.js — BALL MATCH
-   A target colour is announced. Shoot only the spheres wearing
-   that colour. No music = no balls.
+   Spheres fly in on the beat at the tempo of your track. Shoot
+   only the announced colour. No music = no balls.
    ============================================================ */
 (function () {
   'use strict';
@@ -15,6 +15,9 @@
     { name: 'VIOLET', hex: '#a78bfa' },
     { name: 'AMBER', hex: '#ffd166' }
   ];
+  const REF_BPM = 120;
+  const BASE_SPEED = 4.4;
+  const TARGET_BEATS = 12;
 
   class Match extends Arcade.Game {
     constructor(shell) {
@@ -30,26 +33,50 @@
       this.combo = 0;
       this.bestCombo = 0;
       this.hits = 0;
-      this.spawnTimer = 0.4;
-      this.interval = 1.15;
       this.speedMul = 1;
       this.lastShot = -10;
       this.targetIndex = U.randInt(0, PALETTE.length - 1);
+      this._targetBeats = TARGET_BEATS;
       this.targetTimer = 9;
+      this.targetSecondsTotal = 9;
+
+      this.bpm = 0;
+      this._beatTimes = [];
+      this._beatPulse = 0;
+      this._beatAgo = 99;
+      this._fallbackTimer = 0.75;
+
       const c = this.r.camera;
       c.x = 0; c.y = 1.6; c.z = 5; c.yaw = 0; c.pitch = 0;
     }
 
     get target() { return PALETTE[this.targetIndex]; }
 
-    spawn(spread) {
+    _recordBeat() {
+      this._beatTimes.push(this.time);
+      if (this._beatTimes.length > 10) this._beatTimes.shift();
+      this._beatAgo = 0;
+      this._beatPulse = 1;
+      if (this._beatTimes.length < 4) return;
+      const gaps = [];
+      for (let i = 1; i < this._beatTimes.length; i++) {
+        gaps.push(this._beatTimes[i] - this._beatTimes[i - 1]);
+      }
+      gaps.sort((a, b) => a - b);
+      const median = gaps[Math.floor(gaps.length / 2)];
+      if (median < 0.20 || median > 2.0) return;
+      const newBpm = 60 / median;
+      this.bpm = this.bpm > 0 ? this.bpm * 0.7 + newBpm * 0.3 : newBpm;
+    }
+
+    spawn() {
       const idx = U.randInt(0, PALETTE.length - 1);
       const c = PALETTE[idx];
       const r = U.rand(0.6, 1.25);
       this.balls.push({
         x: U.rand(-9, 9),
         y: U.rand(-0.6, 5.0),
-        z: spread ? U.rand(-160, -50) : U.rand(-175, -115),
+        z: U.rand(-175, -140),
         r,
         color: c.hex,
         index: idx,
@@ -62,6 +89,7 @@
       let idx = this.targetIndex;
       while (idx === this.targetIndex) idx = U.randInt(0, PALETTE.length - 1);
       this.targetIndex = idx;
+      this._targetBeats = TARGET_BEATS;
       this.targetTimer = 9;
       this.shell.toast('New target: ' + this.target.name, 1200);
     }
@@ -70,11 +98,18 @@
       this.time += dt;
       const drive = this.audio.drive;
       const playing = this.audio.isPlaying;
+      const beatNow = this.audio.beat;
+      const energy = this.energy(dt);
 
-      this.speedMul = U.smooth(this.speedMul, 1 + drive * 2.4, 0.18, dt);
-      this.interval = U.smooth(this.interval, 1.15 / (1 + drive * 2.2), 0.20, dt);
+      this._beatAgo += dt;
+      if (beatNow) this._recordBeat();
+      this._beatPulse = Math.max(0, this._beatPulse - dt * 2.5);
 
-      // Effects always fade
+      const targetSpeed = this.bpm > 0
+        ? U.clamp(this.bpm / REF_BPM, 0.45, 2.6)
+        : (0.6 + drive * 1.4);
+      this.speedMul = U.smooth(this.speedMul, targetSpeed, 0.35, dt);
+
       for (let i = this.fx.length - 1; i >= 0; i--) {
         const f = this.fx[i];
         f.life -= dt; f.r += f.grow * dt;
@@ -82,22 +117,39 @@
       }
 
       // ────────── THE GATE ──────────
-      // No music, no balls and the target timer pauses too.
       if (!playing) return;
 
-      this.spawnTimer -= dt;
-      if (this.spawnTimer <= 0) {
-        this.spawn(false);
-        this.spawnTimer = this.interval;
+      const cap = 22;
+
+      // spawn on beat
+      if (beatNow && this.balls.length < cap) {
+        this.spawn();
+        if (drive > 1.0 && this.balls.length < cap) this.spawn();
+        if (drive > 1.5 && this.balls.length < cap) this.spawn();
+      }
+      if (this._beatAgo > 1.2) {
+        this._fallbackTimer -= dt;
+        if (this._fallbackTimer <= 0 && this.balls.length < cap) {
+          this.spawn();
+          this._fallbackTimer = 0.75;
+        }
+      } else {
+        this._fallbackTimer = 0.75;
       }
 
-      this.targetTimer -= dt;
-      if (this.targetTimer <= 0) this.pickNewTarget();
+      // target changes every 12 beats, or on the 9s timer if no beats
+      if (beatNow) {
+        this._targetBeats--;
+        if (this._targetBeats <= 0) this.pickNewTarget();
+      } else {
+        this.targetTimer -= dt;
+        if (this.targetTimer <= 0) this.pickNewTarget();
+      }
 
       const mul = this.speedMul * (1 + Math.min(1.2, this.hits / 25));
       for (let i = this.balls.length - 1; i >= 0; i--) {
         const b = this.balls[i];
-        b.z += 4.4 * mul * dt;
+        b.z += BASE_SPEED * mul * dt;
         b.flash = Math.max(0, b.flash - dt * 4);
         if (b.z > this.r.camera.z - 1.2) {
           this.balls.splice(i, 1);
@@ -146,6 +198,12 @@
       const r = this.r;
       r.grid(-1.5, 90, 5, '#2b3f66', 0.22);
 
+      if (this._beatPulse > 0) {
+        const a = (this._beatPulse * 0.35).toFixed(3);
+        r.rect(0, 0, r.w, 5, 'rgba(167,139,250,' + a + ')');
+        r.rect(0, r.h - 5, r.w, 5, 'rgba(167,139,250,' + a + ')');
+      }
+
       for (const b of this.balls) {
         const isTarget = b.index === this.targetIndex;
         r.sphere({ x: b.x, y: b.y, z: b.z }, b.r, b.color, {
@@ -164,18 +222,21 @@
       const cx = r.w / 2;
       r.rect(cx - 118, 20, 236, 46, 'rgba(0,0,0,.5)', 12);
       r.text(cx, 43, 'TARGET: ' + this.target.name, this.target.hex, 22, 'center', 900);
-      const pw = 236 * (this.targetTimer / 9);
+      const pw = 236 * (this._targetBeats / TARGET_BEATS);
       r.rect(cx - 118 + 4, 60, Math.max(0, pw - 8), 3, this.target.hex, 2);
 
       if (this.combo > 1) {
         r.text(cx, 92, 'COMBO x' + this.combo, '#ffffff', 16, 'center', 800);
       }
+
+      const bpmText = this.bpm > 0
+        ? '♪ ' + Math.round(this.bpm) + ' BPM  ×' + this.speedMul.toFixed(2)
+        : '♪ listening…';
+      r.text(r.w - 20, 130, bpmText, '#a78bfa', 13, 'right', 700);
     }
 
     ai() {
       if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
-
-      // Nearest ball of the target colour.
       let target = null, best = Infinity;
       for (const b of this.balls) {
         if (b.index !== this.targetIndex) continue;
@@ -192,6 +253,7 @@
         { k: 'Score', v: this.score },
         { k: 'Target', v: this.target.name },
         { k: 'Matches', v: this.hits },
+        { k: 'Tempo', v: this.bpm > 0 ? Math.round(this.bpm) + ' BPM' : '…' },
         { k: 'Combo', v: 'x' + Math.max(1, this.combo) },
         { k: 'Lives', v: this.lives }
       ];
@@ -203,8 +265,8 @@
     name: 'Ball Match',
     tag: 'Colour',
     color: '#a78bfa',
-    blurb: 'Coloured spheres inbound and a target colour on the banner. Shoot only the right one — the wrong one costs you.',
-    hint: 'Aim and click · target ball outlines glow white',
+    blurb: 'Spheres fly in on the beat at the tempo of your track. Shoot only the announced colour — the wrong one costs you.',
+    hint: 'Aim and click · target ball outlines glow white · colours change every 12 beats',
     create: (shell) => new Match(shell)
   });
 })();

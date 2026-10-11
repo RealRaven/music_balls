@@ -21,10 +21,18 @@
       this.over = false;
       this.bg = { top: '#0b0e18', bottom: '#05060a' };
       this.interval = 1;
+      this._energy = 0;
+      this._lastBeatAt = -1e9;
     }
 
     /* lifecycle */
-    start() { this.time = 0; this.over = false; this.reset(); }
+    start() {
+      this.time = 0;
+      this.over = false;
+      this._energy = 0;
+      this._lastBeatAt = -1e9;
+      this.reset();
+    }
     reset() {}
     update(dt) {}
     draw() {}
@@ -34,6 +42,32 @@
 
     /** @returns {Array<{k:string,v:string|number}>} */
     getStats() { return [{ k: 'Score', v: this.score }]; }
+
+    /* ---------- musical reactivity helpers ---------- */
+
+    /**
+     * Smoothed 0..1 intensity — bass level plus an instant kick when a beat
+     * lands. Use it for density caps, extra effects, spawn multipliers…
+     * Called every frame by the games that use it.
+     */
+    energy(dt) {
+      const target = U.clamp(this.audio.drive * 0.55 + (this.audio.beat ? 0.35 : 0), 0, 1);
+      this._energy = U.smooth(this._energy === undefined ? 0 : this._energy, target, 0.15, dt);
+      return this._energy;
+    }
+
+    /**
+     * True on a fresh beat, rate-limited so we don't double-trigger inside
+     * the same frame or on echo beats. `minGap` defaults to 0.18 s (~330 BPM cap).
+     */
+    onBeat(minGap) {
+      const gap = minGap === undefined ? 0.18 : minGap;
+      if (this.audio.beat && this.time - (this._lastBeatAt || -1e9) > gap) {
+        this._lastBeatAt = this.time;
+        return true;
+      }
+      return false;
+    }
 
     /* helpers */
 

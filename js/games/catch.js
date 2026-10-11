@@ -1,7 +1,7 @@
 /* ============================================================
    catch.js — BALL CATCH
-   Catch the cool-coloured spheres in your basket, dodge the red
-   ones. No music = no falling balls.
+   Balls fall on the beat at the tempo of your track. Catch the
+   cool-coloured ones, dodge the red bombs. No music = nothing falls.
    ============================================================ */
 (function () {
   'use strict';
@@ -10,6 +10,8 @@
 
   const GROUND_Y = -1.5;
   const CATCH_Y = -0.55;
+  const REF_BPM = 120;
+  const BASE_FALL = 7;
 
   class Catch extends Arcade.Game {
     constructor(shell) {
@@ -27,15 +29,38 @@
       this.caught = 0;
       this.basketX = 0;
       this.basketW = 2.2;
-      this.spawnTimer = 0.5;
-      this.interval = 0.85;
       this.fallMul = 1;
+
+      this.bpm = 0;
+      this._beatTimes = [];
+      this._beatPulse = 0;
+      this._beatAgo = 99;
+      this._fallbackTimer = 0.75;
+
       const c = this.r.camera;
       c.x = 0; c.y = 1.6; c.z = 6; c.yaw = 0; c.pitch = 0;
     }
 
-    spawn() {
-      const bad = Math.random() < 0.3;
+    _recordBeat() {
+      this._beatTimes.push(this.time);
+      if (this._beatTimes.length > 10) this._beatTimes.shift();
+      this._beatAgo = 0;
+      this._beatPulse = 1;
+      if (this._beatTimes.length < 4) return;
+      const gaps = [];
+      for (let i = 1; i < this._beatTimes.length; i++) {
+        gaps.push(this._beatTimes[i] - this._beatTimes[i - 1]);
+      }
+      gaps.sort((a, b) => a - b);
+      const median = gaps[Math.floor(gaps.length / 2)];
+      if (median < 0.20 || median > 2.0) return;
+      const newBpm = 60 / median;
+      this.bpm = this.bpm > 0 ? this.bpm * 0.7 + newBpm * 0.3 : newBpm;
+    }
+
+    spawn(bombChance) {
+      const bc = bombChance === undefined ? 0.3 : bombChance;
+      const bad = Math.random() < bc;
       const r = U.rand(0.5, 0.95);
       this.balls.push({
         x: U.rand(-9, 9),
@@ -53,11 +78,18 @@
       this.time += dt;
       const drive = this.audio.drive;
       const playing = this.audio.isPlaying;
+      const beatNow = this.audio.beat;
+      const energy = this.energy(dt);
 
-      this.fallMul = U.smooth(this.fallMul, 1 + drive * 2.2, 0.18, dt);
-      this.interval = U.smooth(this.interval, 0.85 / (1 + drive * 2.0), 0.20, dt);
+      this._beatAgo += dt;
+      if (beatNow) this._recordBeat();
+      this._beatPulse = Math.max(0, this._beatPulse - dt * 2.5);
 
-      // Effects always fade
+      const targetSpeed = this.bpm > 0
+        ? U.clamp(this.bpm / REF_BPM, 0.45, 2.6)
+        : (0.6 + drive * 1.4);
+      this.fallMul = U.smooth(this.fallMul, targetSpeed, 0.35, dt);
+
       for (let i = this.fx.length - 1; i >= 0; i--) {
         const f = this.fx[i];
         f.life -= dt; f.r += f.grow * dt;
@@ -65,13 +97,25 @@
       }
 
       // ────────── THE GATE ──────────
-      // No music, nothing falls. Basket stays where it was.
       if (!playing) return;
 
-      this.spawnTimer -= dt;
-      if (this.spawnTimer <= 0) {
-        this.spawn();
-        this.spawnTimer = this.interval * U.rand(0.7, 1.25);
+      const cap = 24;
+
+      // spawn on beat — bomb ratio climbs with intensity
+      if (beatNow && this.balls.length < cap) {
+        const bc = 0.12 + energy * 0.30;
+        this.spawn(bc);
+        if (drive > 1.0 && this.balls.length < cap) this.spawn(bc);
+        if (drive > 1.5 && this.balls.length < cap) this.spawn(bc);
+      }
+      if (this._beatAgo > 1.2) {
+        this._fallbackTimer -= dt;
+        if (this._fallbackTimer <= 0 && this.balls.length < cap) {
+          this.spawn(0.15 + energy * 0.25);
+          this._fallbackTimer = 0.75;
+        }
+      } else {
+        this._fallbackTimer = 0.75;
       }
 
       this.basketX = U.smooth(this.basketX, this.input.nx * 8.5, 0.3, dt);
@@ -81,7 +125,6 @@
         b.y -= b.vy * this.fallMul * dt;
         b.rot += dt * 2;
 
-        // catch check
         if (b.y <= CATCH_Y + b.r * 0.4 && b.y > CATCH_Y - 1.2) {
           const inBasket = Math.abs(b.x - this.basketX) < this.basketW / 2 + b.r * 0.5;
           if (inBasket) {
@@ -119,14 +162,18 @@
       const r = this.r;
       r.grid(-1.5, 90, 5, '#2b3f66', 0.22);
 
-      // "danger" line at the catch height
+      if (this._beatPulse > 0) {
+        const a = (this._beatPulse * 0.4).toFixed(3);
+        r.rect(0, 0, r.w, 5, 'rgba(123,211,137,' + a + ')');
+        r.rect(0, r.h - 5, r.w, 5, 'rgba(123,211,137,' + a + ')');
+      }
+
       r.line({ x: -9.5, y: CATCH_Y, z: 0 }, { x: 9.5, y: CATCH_Y, z: 0 }, '#5b7fbf', 1, 0.3);
 
       for (const b of this.balls) {
         r.sphere({ x: b.x, y: b.y, z: 0 }, b.r, b.color, { glow: b.bad });
       }
 
-      // basket: an arc made of overlapping spheres
       const segs = 7;
       for (let i = 0; i < segs; i++) {
         const t = i / (segs - 1);
@@ -140,13 +187,16 @@
       }
 
       if (this.combo > 1) r.text(r.w / 2, 40, 'COMBO x' + this.combo, '#7bd389', 24, 'center', 900);
+
+      const bpmText = this.bpm > 0
+        ? '♪ ' + Math.round(this.bpm) + ' BPM  ×' + this.fallMul.toFixed(2)
+        : '♪ listening…';
+      r.text(r.w - 20, 90, bpmText, '#7bd389', 13, 'right', 700);
     }
 
     ai() {
       if (!this.audio.isPlaying) return { x: 0, y: 0, fire: false };
 
-      // Prefer the nearest good ball that is still catchable; bail out if
-      // a bomb is closer to the basket.
       let targetX = null, bestT = Infinity;
       let bombX = null, bombT = Infinity;
 
@@ -171,6 +221,7 @@
         { k: 'Score', v: this.score },
         { k: 'Caught', v: this.caught },
         { k: 'Combo', v: 'x' + Math.max(1, this.combo) },
+        { k: 'Tempo', v: this.bpm > 0 ? Math.round(this.bpm) + ' BPM' : '…' },
         { k: 'Lives', v: this.lives }
       ];
     }
@@ -181,8 +232,8 @@
     name: 'Ball Catch',
     tag: 'Reflex',
     color: '#7bd389',
-    blurb: 'Spheres rain from above. Fill your basket with the coloured ones, let the red bombs smash into the floor.',
-    hint: 'Move the basket with the mouse · red = avoid · combos multiply',
+    blurb: 'Balls fall on the beat at the tempo of your track. Fill your basket with the coloured ones, let the red bombs smash into the floor.',
+    hint: 'Move the basket with the mouse · red = avoid · balls fall at the song\'s BPM',
     create: (shell) => new Catch(shell)
   });
 })();
