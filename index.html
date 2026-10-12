@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Ball Arcade — Audio-Reactive Ball Games</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+
+  <!-- ===== in-game HUD ===== -->
+  <div id="hud" class="panel"><div id="hudStats"></div></div>
+
+  <div id="crosshair" aria-hidden="true"></div>
+  <div id="toast"></div>
+
+  <!-- ===== waiting for music overlay ===== -->
+  <div id="waitingAudio" aria-hidden="true">
+    <div class="wa-icon">♪</div>
+    <div class="wa-title">Waiting for music</div>
+    <div class="wa-sub">The game only moves to the beat. Load a file, share a Chrome tab, or use your mic.</div>
+  </div>
+
+  <div id="topRight">
+    <button id="btnPause" class="mini">Pause <kbd>P</kbd></button>
+    <button id="btnAim"   class="mini">Aim: Mouse</button>
+    <button id="btnAI"    class="mini">AI: Off</button>
+    <button id="btnMenu"  class="mini ghost">Menu <kbd>Esc</kbd></button>
+  </div>
+
+  <!-- ===== pause / game-over overlay ===== -->
+  <div id="pauseOverlay" aria-hidden="true">
+    <div id="pauseMenu" class="panel" role="dialog" aria-modal="true">
+      <h2 id="pauseTitle">Paused</h2>
+      <p id="pauseText">Take a breath.</p>
+      <div class="row center">
+        <button id="resumeBtn">Resume</button>
+        <button id="restartBtn" class="ghost">Restart</button>
+        <button id="quitBtn" class="ghost">Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== main menu ===== -->
+  <div id="menu">
+    <div class="menu-inner">
+      <header>
+        <h1>BALL <span>ARCADE</span></h1>
+        <p class="sub">Six audio-reactive ball games. Your music drives the speed, the spawn rate and the chaos —
+          play them yourself, or flip the switch and let the AI take over.</p>
+      </header>
+
+      <section class="audio-bar panel">
+        <div class="ab-col">
+          <div class="ab-title">Music source</div>
+          <div class="ab-row">
+            <label class="filebtn">Load audio file<input id="fileInput" type="file" accept="audio/*" hidden /></label>
+            <button id="btnMic" class="mini">Microphone</button>
+            <button id="btnTab" class="mini">Share tab audio</button>
+            <button id="btnStopAudio" class="mini ghost">Stop</button>
+          </div>
+        </div>
+        <div class="ab-col">
+          <div class="ab-row">
+            <span class="lbl">Sensitivity</span>
+            <input id="sensitivity" type="range" min="0" max="3" step="0.01" value="1" />
+          </div>
+          <div id="meter"><i id="meterFill"></i></div>
+          <div class="ab-note">Tab / system audio capture works in <strong>Chrome</strong> — pick a tab and tick
+            “Share audio”. No music means no game: balls only move while sound is playing.</div>
+        </div>
+      </section>
+
+      <section id="gameGrid"></section>
+
+      <footer>
+        <span>No external libraries · plain Canvas 2D + Web Audio</span>
+        <span class="keys"><kbd>Click</kbd> act · <kbd>M</kbd> aim mode · <kbd>P</kbd> pause · <kbd>R</kbd> restart · <kbd>Esc</kbd> menu · <kbd>A</kbd> AI</span>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<!-- engine -->
+<script src="js/engine/util.js"></script>
+<script src="js/engine/renderer.js"></script>
+<script src="js/engine/audio.js"></script>
+<script src="js/engine/input.js"></script>
+<script src="js/engine/game.js"></script>
+<!-- games -->
+<script src="js/games/blast.js"></script>
+<script src="js/games/dodge.js"></script>
+<script src="js/games/rally.js"></script>
+<script src="js/games/catch.js"></script>
+<script src="js/games/rhythm.js"></script>
+<script src="js/games/match.js"></script>
+<!-- shell -->
+<script src="js/app.js"></script>
+</body>
+</html>
