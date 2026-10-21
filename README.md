@@ -37,6 +37,9 @@ Microphone and tab-audio capture need a secure context. `localhost` counts; `fil
 | **Ball Catch** | Reflex | Catch the cool-coloured spheres in your basket. Avoid the red bombs. Combos multiply points. |
 | **Ball Rhythm** | Timing | Spheres fly down three lanes. Fire the moment one crosses the golden ring. Notes can spawn on the beat. |
 | **Ball Match** | Colour | A target colour is announced. Shoot only that colour. The wrong one costs you. |
+| **Beat Tap** | Precision | Targets pulse on the beat. Click each one exactly as its approach ring closes. Timing = score. |
+| **Beat Runner** | Jump | Auto-run forward. Jump over obstacles that spawn on the beat. On-beat jumps clear for 2×. |
+| **Beat Flap** | Reflex | Gravity pulls you down, tap to flap. Fly through gates — the gap shrinks with the music. |
 
 ---
 
